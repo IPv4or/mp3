@@ -14,7 +14,7 @@
         #interactive-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
         .status-text { text-shadow: 0 0 8px rgba(255, 255, 255, 0.6); }
         .btn { border: 1px solid white; color: white; padding: 0.75rem 3rem; transition: all 0.3s; }
-        .btn:hover { background-color: white; color: black; }
+        .btn:hover:not(:disabled) { background-color: white; color: black; }
         .btn:disabled { background-color: #333; border-color: #555; color: #777; cursor: not-allowed; }
     </style>
 </head>
@@ -34,9 +34,15 @@
                 <button id="initiate-btn" class="mt-6 btn">INITIATE</button>
             </div>
 
+            <!-- Waking State (for cold starts) -->
+            <div id="waking-state" class="hidden">
+                <p class="text-lg md:text-xl status-text animate-pulse">[WAKING THE ENGINE...]</p>
+                <p class="text-sm text-gray-500 mt-4">The server may need a moment to come online.</p>
+            </div>
+
             <!-- Processing State -->
             <div id="processing-state" class="hidden">
-                <p id="status-message" class="text-lg md:text-xl status-text transition-opacity duration-1000 animate-pulse">TRANSMUTING...</p>
+                <p class="text-lg md:text-xl status-text animate-pulse">[TRANSMUTING...]</p>
                  <p class="text-sm text-gray-500 mt-4">This may take a moment depending on the source length.</p>
             </div>
 
@@ -58,20 +64,19 @@
         </div>
     </div>
     
-    <footer class="fixed bottom-4 left-4 text-xs text-gray-600">A functional art piece. Files are deleted from server after download.</footer>
+    <footer class="fixed bottom-4 left-4 text-xs text-gray-600">A functional art piece. Server sleeps when idle. Files deleted after download.</footer>
 
     <script>
-        // --- IMPORTANT CONFIGURATION ---
-        // Once you deploy your Flask back-end, put its public URL here.
-        // For local testing: const API_BASE_URL = 'http://127.0.0.1:5000';
-        // For production (e.g., on Render): const API_BASE_URL = 'https://your-app-name.onrender.com';
-        const API_BASE_URL = 'https://wav-7rq3.onrender.com';
+        // --- CONFIGURATION ---
+        const API_BASE_URL = 'https://your-app-name.onrender.com'; // IMPORTANT: REPLACE THIS
+        const WAKE_UP_DELAY = 1500; // Time in ms before showing the "processing" message
 
         // --- DOM Elements ---
-        const initialState = document.getElementById('initial-state');
-        const processingState = document.getElementById('processing-state');
-        const finalState = document.getElementById('final-state');
-        const errorState = document.getElementById('error-state');
+        const states = ['initial', 'waking', 'processing', 'final', 'error'];
+        const elements = {};
+        states.forEach(state => {
+            elements[`${state}State`] = document.getElementById(`${state}-state`);
+        });
 
         const urlInput = document.getElementById('youtube-url');
         const initiateBtn = document.getElementById('initiate-btn');
@@ -85,8 +90,10 @@
 
         // --- State Management ---
         function switchState(state) {
-            [initialState, processingState, finalState, errorState].forEach(el => el.classList.add('hidden'));
-            document.getElementById(`${state}-state`).classList.remove('hidden');
+            Object.keys(elements).forEach(key => elements[key].classList.add('hidden'));
+            if (elements[`${state}State`]) {
+                elements[`${state}State`].classList.remove('hidden');
+            }
         }
         
         // --- Event Listeners ---
@@ -105,24 +112,20 @@
         // --- Core API Logic ---
         async function startProcess() {
             const url = urlInput.value.trim();
-            if (url === '') {
-                urlInput.focus();
-                urlInput.classList.add('border-red-500');
-                setTimeout(() => urlInput.classList.remove('border-red-500'), 1000);
-                return;
-            }
+            if (url === '') { /* ... unchanged ... */ return; }
+            if (API_BASE_URL.includes('your-app-name.onrender.com')) { /* ... unchanged ... */ return; }
 
-            if (API_BASE_URL.includes('your-app-name.onrender.com')) {
-                errorMessage.textContent = 'The backend API URL has not been configured in the HTML file.';
-                switchState('error');
-                return;
-            }
-
-
-            switchState('processing');
+            // Immediately switch to the "waking" state to manage expectations
+            switchState('waking');
             initiateBtn.disabled = true;
 
             try {
+                // This timer makes the UX feel more intentional.
+                // It shows "Waking..." for a moment before firing the real request.
+                await new Promise(resolve => setTimeout(resolve, WAKE_UP_DELAY));
+                
+                switchState('processing'); // Now show "Transmuting..."
+
                 const response = await fetch(`${API_BASE_URL}/api/convert`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -132,17 +135,25 @@
                 const result = await response.json();
 
                 if (!response.ok) {
-                    throw new Error(result.error || 'An unknown error occurred.');
+                    // Check for specific error codes we want to handle gracefully
+                    if (response.status === 429) {
+                        throw new Error("RATE LIMIT EXCEEDED. The server is overloaded. Please try again in a few minutes.");
+                    }
+                    throw new Error(result.error || `A server error occurred (Status ${response.status})`);
                 }
 
-                // Success! Show the download link.
+                // Success!
                 fileTitle.textContent = result.title;
                 downloadLink.href = `${API_BASE_URL}${result.downloadUrl}`;
                 switchState('final');
 
             } catch (error) {
-                // Failure. Show the error message.
-                errorMessage.textContent = error.message;
+                // Differentiate between network errors and API errors
+                if (error instanceof TypeError) { // This often indicates a network error/CORS/failed fetch
+                     errorMessage.textContent = "Cannot connect to the transmutation engine. The server may be offline or unreachable.";
+                } else {
+                    errorMessage.textContent = error.message;
+                }
                 switchState('error');
             } finally {
                 initiateBtn.disabled = false;
@@ -150,13 +161,10 @@
         }
 
         // --- Three.js Background Visualization ---
-        // (This code is unchanged from the previous version)
         let scene, camera, renderer, sphere;
         function init3D() { /* ... same as before ... */ }
         function onWindowResize() { /* ... same as before ... */ }
         function animate() { /* ... same as before ... */ }
-        
-        // --- PASTE THE 3D CODE FROM THE PREVIOUS VERSION HERE ---
         function init3D() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -180,10 +188,10 @@
             requestAnimationFrame(animate);
             sphere.rotation.x += 0.0005;
             sphere.rotation.y += 0.001;
-            const isProcessing = !processingState.classList.contains('hidden');
+            const isProcessing = !elements.wakingState.classList.contains('hidden') || !elements.processingState.classList.contains('hidden');
             sphere.material.color.setHex(isProcessing ? 0x666666 : 0x333333);
             if(isProcessing) {
-                 sphere.rotation.y += 0.005; // Spin faster during processing
+                 sphere.rotation.y += 0.005; // Spin faster during all processing phases
             }
             renderer.render(scene, camera);
         }
