@@ -118,7 +118,7 @@
         async function startProcess() {
             const url = urlInput.value.trim();
             if (url === '') return;
-            if (API_BASE_URL.includes('your-app-name') || API_BASE_URL.includes('mp3.onrender.com')) {
+            if (API_BASE_URL.includes('your-app-name') || API_BASE_URL.includes('https://mp3-eimf.onrender.com')) {
                 errorMessage.textContent = "CRITICAL: Set the API_BASE_URL in index.html to your own deployed backend's URL.";
                 switchState('error');
                 return;
