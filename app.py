@@ -1,5 +1,4 @@
 # app.py
-# --- Imports ---
 import os
 import uuid
 from flask import Flask, request, jsonify, send_from_directory
@@ -9,14 +8,36 @@ import yt_dlp
 # --- Flask App Initialization & Config ---
 app = Flask(__name__)
 CORS(app)
-DOWNLOAD_FOLDER = 'static/downloads'
+
+# --- IMPORTANT: Paths updated for Render's persistent disk ---
+PERSISTENT_STORAGE_PATH = '/data'
+DOWNLOAD_FOLDER = os.path.join(PERSISTENT_STORAGE_PATH, 'downloads')
+COOKIES_FILE_PATH = os.path.join(PERSISTENT_STORAGE_PATH, 'cookies.txt')
+
+# Create directories on the persistent disk if they don't exist
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
+
 app.config['DOWNLOAD_FOLDER'] = DOWNLOAD_FOLDER
-COOKIES_FILE_PATH = 'cookies.txt'
 
 
-# --- API Route ---
+# --- API Route for Cookie Upload ---
+@app.route('/api/upload-cookies', methods=['POST'])
+def upload_cookies():
+    data = request.get_json()
+    if not data or 'cookieContent' not in data:
+        return jsonify({"error": "No cookie content provided"}), 400
+
+    try:
+        # Save the received content to the cookies.txt file on the persistent disk
+        with open(COOKIES_FILE_PATH, 'w') as f:
+            f.write(data['cookieContent'])
+        return jsonify({"message": "Cookies updated successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": f"Failed to save cookies: {str(e)}"}), 500
+
+
+# --- API Route for Conversion ---
 @app.route('/api/convert', methods=['POST'])
 def convert_video():
     data = request.get_json()
@@ -25,20 +46,19 @@ def convert_video():
 
     youtube_url = data['url']
     unique_id = str(uuid.uuid4())
+    # Output template now points to the persistent download folder
     output_template = os.path.join(app.config['DOWNLOAD_FOLDER'], f'{unique_id}.%(ext)s')
 
-    # --- UPDATED SECTION for MP3 Conversion ---
     ydl_opts = {
         'format': 'bestaudio/best',
         'outtmpl': output_template,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',  # Changed from 'wav' to 'mp3'
-            'preferredquality': '0',   # For MP3, '0' is the highest quality VBR
+            'preferredcodec': 'mp3',
+            'preferredquality': '0',
         }],
         'quiet': True,
     }
-    # --- END UPDATED SECTION ---
 
     if os.path.exists(COOKIES_FILE_PATH):
         ydl_opts['cookiefile'] = COOKIES_FILE_PATH
@@ -46,10 +66,7 @@ def convert_video():
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(youtube_url, download=True)
-            
-            # --- UPDATED FILENAME LOGIC ---
-            # The final filename will now be .mp3
-            final_filename = f"{unique_id}.mp3" 
+            final_filename = f"{unique_id}.mp3"
             file_path = os.path.join(app.config['DOWNLOAD_FOLDER'], final_filename)
 
             if not os.path.exists(file_path):
@@ -74,4 +91,12 @@ def download_file(filename):
     return send_from_directory(app.config['DOWNLOAD_FOLDER'], filename, as_attachment=True)
 
 if __name__ == '__main__':
+    # Ensure local dev uses a local folder
+    PERSISTENT_STORAGE_PATH = '.' 
+    DOWNLOAD_FOLDER = os.path.join(PERSISTENT_STORAGE_PATH, 'downloads')
+    COOKIES_FILE_PATH = os.path.join(PERSISTENT_STORAGE_PATH, 'cookies.txt')
+    if not os.path.exists(DOWNLOAD_FOLDER):
+        os.makedirs(DOWNLOAD_FOLDER)
+    app.config['DOWNLOAD_FOLDER'] = DOWNLOAD_FOLDER
+    
     app.run(host='0.0.0.0', port=5000, debug=True)
