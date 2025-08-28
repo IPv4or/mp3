@@ -16,6 +16,8 @@
         .btn { border: 1px solid white; color: white; padding: 0.75rem 3rem; transition: all 0.3s; }
         .btn:hover:not(:disabled) { background-color: white; color: black; }
         .btn:disabled { background-color: #333; border-color: #555; color: #777; cursor: not-allowed; }
+        .btn-secondary { border-color: #555; color: #999; padding: 0.5rem 1rem; font-size: 0.8rem; }
+        .btn-secondary:hover:not(:disabled) { background-color: #555; color: white; }
     </style>
 </head>
 <body class="bg-black text-white antialiased">
@@ -24,7 +26,6 @@
     <div id="app" class="min-h-screen w-full flex items-center justify-center p-4">
         <div class="w-full max-w-xl text-center">
             
-            <!-- Initial State -->
             <div id="initial-state">
                 <h1 class="text-2xl md:text-3xl font-bold mb-2">[WAVEFORM]</h1>
                 <p class="text-sm text-gray-400 mb-8">mp3 converter</p>
@@ -32,35 +33,17 @@
                     <input id="youtube-url" type="text" placeholder="PASTE SOURCE URL" class="w-full bg-transparent border border-gray-600 focus:border-white text-white p-4 text-center placeholder-gray-500 focus:outline-none transition-colors duration-300">
                 </div>
                 <button id="initiate-btn" class="mt-6 btn">INITIATE</button>
+                <div class="mt-6">
+                    <input type="file" id="cookie-upload-input" accept=".txt" class="hidden">
+                    <button id="cookie-upload-btn" class="btn-secondary">Update Cookies</button>
+                    <p id="cookie-status" class="text-xs text-gray-500 mt-2 h-4"></p>
+                </div>
             </div>
 
-            <!-- Waking State (for cold starts) -->
-            <div id="waking-state" class="hidden">
-                <p class="text-lg md:text-xl status-text animate-pulse">[WAKING THE ENGINE...]</p>
-                <p class="text-sm text-gray-500 mt-4">The server may need a moment to come online.</p>
-            </div>
-
-            <!-- Processing State -->
-            <div id="processing-state" class="hidden">
-                <p class="text-lg md:text-xl status-text animate-pulse">[TRANSMUTING...]</p>
-                 <p class="text-sm text-gray-500 mt-4">This may take a moment depending on the source length.</p>
-            </div>
-
-            <!-- Final State -->
-            <div id="final-state" class="hidden">
-                 <h2 class="text-2xl md:text-3xl font-bold mb-2">[TRANSMUTATION COMPLETE]</h2>
-                 <p id="file-title" class="text-gray-300 mb-6 max-w-md mx-auto"></p>
-                 <a id="download-link" href="#" class="btn inline-block">DOWNLOAD .MP3</a>
-                 <button id="again-btn" class="mt-4 btn">AGAIN</button>
-            </div>
-
-             <!-- Error State -->
-            <div id="error-state" class="hidden">
-                 <h2 class="text-xl md:text-2xl font-bold mb-4 text-red-500">[TRANSMISSION FAILED]</h2>
-                 <p id="error-message" class="text-gray-400 mb-8 max-w-md mx-auto"></p>
-                 <button id="retry-btn" class="mt-6 btn">RETRY</button>
-            </div>
-
+            <div id="waking-state" class="hidden"><p class="text-lg md:text-xl status-text animate-pulse">[WAKING THE ENGINE...]</p><p class="text-sm text-gray-500 mt-4">The server may need a moment to come online.</p></div>
+            <div id="processing-state" class="hidden"><p class="text-lg md:text-xl status-text animate-pulse">[TRANSMUTING...]</p><p class="text-sm text-gray-500 mt-4">This may take a moment depending on the source length.</p></div>
+            <div id="final-state" class="hidden"><h2 class="text-2xl md:text-3xl font-bold mb-2">[TRANSMUTATION COMPLETE]</h2><p id="file-title" class="text-gray-300 mb-6 max-w-md mx-auto"></p><a id="download-link" href="#" class="btn inline-block">DOWNLOAD .MP3</a><button id="again-btn" class="mt-4 btn">AGAIN</button></div>
+            <div id="error-state" class="hidden"><h2 class="text-xl md:text-2xl font-bold mb-4 text-red-500">[TRANSMISSION FAILED]</h2><p id="error-message" class="text-gray-400 mb-8 max-w-md mx-auto"></p><button id="retry-btn" class="mt-6 btn">RETRY</button></div>
         </div>
     </div>
     
@@ -68,8 +51,8 @@
 
     <script>
         // --- CONFIGURATION ---
-        const API_BASE_URL = 'https://mp3-2pi1.onrender.com'; // IMPORTANT: REPLACE THIS
-        const WAKE_UP_DELAY = 1500; // Time in ms before showing the "processing" message
+        const API_BASE_URL = 'https://your-app-name.onrender.com'; // IMPORTANT: REPLACE THIS
+        const WAKE_UP_DELAY = 1500; 
 
         // --- DOM Elements ---
         const states = ['initial', 'waking', 'processing', 'final', 'error'];
@@ -77,16 +60,17 @@
         states.forEach(state => {
             elements[`${state}State`] = document.getElementById(`${state}-state`);
         });
-
         const urlInput = document.getElementById('youtube-url');
         const initiateBtn = document.getElementById('initiate-btn');
         const downloadLink = document.getElementById('download-link');
         const fileTitle = document.getElementById('file-title');
         const errorMessage = document.getElementById('error-message');
-        
         const againBtn = document.getElementById('again-btn');
         const retryBtn = document.getElementById('retry-btn');
-
+        // New cookie elements
+        const cookieUploadBtn = document.getElementById('cookie-upload-btn');
+        const cookieUploadInput = document.getElementById('cookie-upload-input');
+        const cookieStatus = document.getElementById('cookie-status');
 
         // --- State Management ---
         function switchState(state) {
@@ -103,53 +87,82 @@
         });
         againBtn.addEventListener('click', reset);
         retryBtn.addEventListener('click', reset);
+        cookieUploadBtn.addEventListener('click', () => cookieUploadInput.click());
+        cookieUploadInput.addEventListener('change', handleCookieUpload);
+
 
         function reset() {
             urlInput.value = '';
+            cookieStatus.textContent = '';
             switchState('initial');
         }
 
-        // --- Core API Logic ---
+        // --- NEW: Cookie Upload Logic ---
+        async function handleCookieUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const content = e.target.result;
+                cookieStatus.textContent = 'Uploading...';
+                try {
+                    const response = await fetch(`${API_BASE_URL}/api/upload-cookies`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ cookieContent: content })
+                    });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.error);
+                    
+                    cookieStatus.textContent = 'Cookies updated successfully!';
+                } catch (error) {
+                    cookieStatus.textContent = `Error: ${error.message}`;
+                } finally {
+                     // Clear the input so the same file can be re-uploaded
+                    cookieUploadInput.value = '';
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // --- Core API Logic (unchanged) ---
         async function startProcess() {
             const url = urlInput.value.trim();
-            if (url === '') { /* ... unchanged ... */ return; }
-            if (API_BASE_URL.includes('your-app-name.onrender.com')) { /* ... unchanged ... */ return; }
+            if (url === '') return;
+            if (API_BASE_URL.includes('your-app-name.onrender.com')) {
+                errorMessage.textContent = "You must set the API_BASE_URL in index.html to your deployed backend's URL.";
+                switchState('error');
+                return;
+            }
 
-            // Immediately switch to the "waking" state to manage expectations
             switchState('waking');
             initiateBtn.disabled = true;
 
             try {
-                // This timer makes the UX feel more intentional.
-                // It shows "Waking..." for a moment before firing the real request.
                 await new Promise(resolve => setTimeout(resolve, WAKE_UP_DELAY));
-                
-                switchState('processing'); // Now show "Transmuting..."
+                switchState('processing');
 
                 const response = await fetch(`${API_BASE_URL}/api/convert`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url: url })
                 });
-
                 const result = await response.json();
 
                 if (!response.ok) {
-                    // Check for specific error codes we want to handle gracefully
                     if (response.status === 429) {
                         throw new Error("RATE LIMIT EXCEEDED. The server is overloaded. Please try again in a few minutes.");
                     }
                     throw new Error(result.error || `A server error occurred (Status ${response.status})`);
                 }
-
-                // Success!
+                
                 fileTitle.textContent = result.title;
                 downloadLink.href = `${API_BASE_URL}${result.downloadUrl}`;
                 switchState('final');
 
             } catch (error) {
-                // Differentiate between network errors and API errors
-                if (error instanceof TypeError) { // This often indicates a network error/CORS/failed fetch
+                if (error instanceof TypeError) {
                      errorMessage.textContent = "Cannot connect to the transmutation engine. The server may be offline or unreachable.";
                 } else {
                     errorMessage.textContent = error.message;
@@ -160,11 +173,8 @@
             }
         }
 
-        // --- Three.js Background Visualization ---
+        // --- Three.js Background Visualization (unchanged) ---
         let scene, camera, renderer, sphere;
-        function init3D() { /* ... same as before ... */ }
-        function onWindowResize() { /* ... same as before ... */ }
-        function animate() { /* ... same as before ... */ }
         function init3D() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -191,7 +201,7 @@
             const isProcessing = !elements.wakingState.classList.contains('hidden') || !elements.processingState.classList.contains('hidden');
             sphere.material.color.setHex(isProcessing ? 0x666666 : 0x333333);
             if(isProcessing) {
-                 sphere.rotation.y += 0.005; // Spin faster during all processing phases
+                 sphere.rotation.y += 0.005; 
             }
             renderer.render(scene, camera);
         }
